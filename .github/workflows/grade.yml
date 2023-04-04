@@ -1,0 +1,39 @@
+name: grade
+on: [push]
+jobs:
+  run-using-github:
+    if : github.repository_owner == 'cu-csci-2400-computer-systems'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run all tests
+        run: make tests
+
+  grading-for-student:
+    if : github.repository_owner != 'cu-csci-2400-computer-systems'
+    runs-on: [self-hosted, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install needed Ubuntu Packages 
+        run: sudo apt-get update && sudo apt-get install -y build-essential perl python3
+      - name: prepare to build
+        run: make clean
+      - name: build
+        run: make
+      - name: check python version
+        run: python3 --version
+      - name: run test 1
+        run: python3 ./shellAutograder.py 1
+      - name: run test 2
+        run: python3 ./shellAutograder.py 2
+      - name: run test 3
+        run: python3 ./shellAutograder.py 3
+      - name: run test 4
+        run: python3 ./shellAutograder.py 4
+      - name: Looks good so far, run grading script to determine score...
+        run: python3 ./shellAutograder.py | tee ./grading-output.txt
+      - name: Copy grade artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: grading-output.txt
+          path: ./grading-output.txt

@@ -1,0 +1,21 @@
+#
+# ignore core files
+##
+**core.*
+##./**core.*
+.ipynb_checkpoints
+# .nfs files are created when an open file is removed but is still being accessed
+.nfs*
+##
+## and local .o
+##
+*.o
+##
+## Lab specific
+##
+myspin
+mysplit
+mystop
+myint
+tsh
+
