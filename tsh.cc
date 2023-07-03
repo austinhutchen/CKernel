@@ -44,8 +44,7 @@ void waitfg(pid_t pid);
 
 void sigchld_handler(int sig);
 void sigtstp_handler(int sig);
-void sigint_handler(int sig);
-
+void sigint_handler(int sig); 
 //
 // main - The shell's main routine 
 //
@@ -156,18 +155,50 @@ void eval(char *cmdline)
   // use below to launch a process.
   //
   char *argv[MAXARGS];
-
-  //
+    char buf[MAXLINE];
+     //
   // The 'bg' variable is TRUE if the job should run
   // in background mode or FALSE if it should run in FG
   //
-  int bg = parseline(cmdline, argv); 
-  if (argv[0] == NULL)  
-    return;   /* ignore empty lines */
+  int bg;
+  pid_t pid;
+    struct job_t *job;
+    strcpy(buf, cmdline);
+    // parse command line for commands using parseline
+  bg=parseline(cmdline,argv);
+        /* ignore empty lines */
+    if(argv[0]==NULL){
+    return;}
 
+  /* test for other built in commands */
+   if(w){
+       sigset_t mask;
+       sigemptyset(&mask);
+       sigaddset(&mask,SIGINT);
+       sigaddset(&mask,SIGCHLD);
+       sigaddset(&mask,SIGTSTP);
+       sigprocmask(SIG_BLOCK,&mask,NULL);
+       /* fork and exec the specified program, for program not built-in */
+    if((pid= fork()) == 0){
+           sigprocmask(SIG_UNBLOCK,&mask,NULL);
+        setpgid(0,0);
+    if(execve(argv[0],argv,environ)<0){
+    printf("%s: Command not found\n", argv[0]);
+     exit(0);
+    }
+    }
+       addjob(jobs, pid, bg ? BG : FG, cmdline);
+       sigprocmask(SIG_UNBLOCK,&mask,NULL);
+    if(!bg){
+   waitfg(pid);
+    }
+ else{
+     job =getjobpid(jobs,pid);
+     printf("[%d] (%d) %s", job->jid, job->pid,cmdline);
+ }
+   }
   return;
 }
-
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -179,7 +210,18 @@ void eval(char *cmdline)
 //
 int builtin_cmd(char **argv) 
 {
-  string cmd(argv[0]);
+  if (strcmp(argv[0],"quit")==0){ /*quit command*/
+	exit(0);
+	}		
+  else if((strcmp(argv[0],"bg")) == 0 || (strcmp(argv[0],"fg") == 0)){
+      /* handle foreground or background command and return 1 to indicate built-in cmd */
+  	do_bgfg(argv);
+  	return 1;
+  }
+  else if (strcmp(argv[0],"jobs")==0){
+	listjobs(jobs); //call list jobs function from jobs.cc
+	return 1;
+	}				
   return 0;     /* not a builtin command */
 }
 
@@ -189,46 +231,60 @@ int builtin_cmd(char **argv)
 //
 void do_bgfg(char **argv) 
 {
-  struct job_t *jobp=NULL;
-    
-  /* Ignore command if no argument */
-  if (argv[1] == NULL) {
-    printf("%s command requires PID or %%jobid argument\n", argv[0]);
-    return;
-  }
-    
-  /* Parse the required PID or %JID arg */
-  if (isdigit(argv[1][0])) {
-    pid_t pid = atoi(argv[1]);
-    if (!(jobp = getjobpid(jobs, pid))) {
-      printf("(%d): No such process\n", pid);
-      return;
-    }
-  }
-  else if (argv[1][0] == '%') {
-    int jid = atoi(&argv[1][1]);
-    if (!(jobp = getjobjid(jobs, jid))) {
-      printf("%s: No such job\n", argv[1]);
-      return;
-    }
-  }	    
-  else {
-    printf("%s: argument must be a PID or %%jobid\n", argv[0]);
-    return;
-  }
+   struct job_t *job;
+    char *tmp;
+    int jid;
+    pid_t pid;
 
-  //
-  // You need to complete rest. At this point,
-  // the variable 'jobp' is the job pointer
-  // for the job ID specified as an argument.
-  //
-  // Your actions will depend on the specified command
-  // so we've converted argv[0] to a string (cmd) for
-  // your benefit.
-  //
-  string cmd(argv[0]);
-
-  return;
+    tmp = argv[1];
+    
+    // if id does not exist
+    if(tmp == NULL) {
+        printf("%s command requires PID or %%jobid argument\n", argv[0]);
+        return;
+    }
+    
+    // if it is a jid
+    if(tmp[0] == '%') {  
+        jid = atoi(&tmp[1]); 
+        //get job
+        job = getjobjid(jobs, jid);
+        if(job == NULL){  
+            printf("%s: No such job\n", tmp);  
+            return;  
+        }else{
+            //get the pid if a valid job for later to kill
+            pid = job->pid;
+        }
+    } 
+    // if it is a pid
+    else if(isdigit(tmp[0])) { 
+        //get pid
+        pid = atoi(tmp); 
+        //get job 
+        job = getjobpid(jobs, pid); 
+        if(job == NULL){  
+            printf("(%d): No such process\n", pid);  
+            return;  
+        }  
+    }  
+    else {
+        printf("%s: argument must be a PID or %%jobid\n", argv[0]);
+        return;
+    }
+    //kill for each time
+    kill(-pid, SIGCONT);
+    
+    if(!strcmp("fg", argv[0])) {
+        //wait for fg
+        job->state = FG;
+        waitfg(job->pid);
+    } 
+    else{
+        //print for bg
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
+        job->state = BG;
+    } 
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -237,7 +293,11 @@ void do_bgfg(char **argv)
 //
 void waitfg(pid_t pid)
 {
-  return;
+    job_t* temp = getjobpid(jobs,pid);
+    while(temp->state == FG){         
+        sleep(1);
+    }
+    return;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -256,7 +316,32 @@ void waitfg(pid_t pid)
 //
 void sigchld_handler(int sig) 
 {
-  return;
+
+    int status;  
+    pid_t pid;  
+    
+    while ((pid = waitpid(fgpid(jobs), &status, WNOHANG|WUNTRACED)) > 0) {  
+        if (WIFSTOPPED(status)){ 
+            //change state if stopped
+            getjobpid(jobs, pid)->state = ST;
+            int jid = pid2jid(pid);
+            printf("Job [%d] (%d) Stopped by signal %d\n", jid, pid, WSTOPSIG(status));
+        }  
+        else if (WIFSIGNALED(status)){
+            //delete is signaled
+            int jid = pid2jid(pid);  
+            printf("Job [%d] (%d) terminated by signal %d\n", jid, pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        }  
+        else if (WIFEXITED(status)){  
+            //exited
+            deletejob(jobs, pid);  
+        } 
+        else{
+            unix_error("waitpid error");
+        }
+    }  
+    return; 
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -267,8 +352,16 @@ void sigchld_handler(int sig)
 //
 void sigint_handler(int sig) 
 {
-  return;
+  pid_t pid = fgpid(jobs);
+	//creating a pointer to the job in the fg job list. based off the pid passed in. 
+if(pid!=0){
+kill(-pid,sig);
 }
+}
+	
+	
+
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -278,13 +371,14 @@ void sigint_handler(int sig)
 //
 void sigtstp_handler(int sig) 
 {
-  return;
+  pid_t pid = fgpid(jobs);  
+    //check for valid pid
+    if (pid != 0) { 
+        kill(-pid, sig);  
+    }  
+    return;   
 }
 
 /*********************
  * End signal handlers
  *********************/
-
-
-
-
