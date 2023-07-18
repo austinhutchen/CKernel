@@ -161,6 +161,7 @@ void eval(char *cmdline) {
   int bg;
   pid_t pid;
   struct job_t *job;
+  char **environ;
   strcpy(buf, cmdline);
   // parse command line for commands using parseline
   bg = parseline(cmdline, argv);
