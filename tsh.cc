@@ -27,6 +27,7 @@ using namespace std;
 
 static char prompt[] = "tsh> ";
 int verbose = 0;
+  char **environ=0x0;
 
 //
 // You need to implement the functions eval, builtin_cmd, do_bgfg,
@@ -161,7 +162,6 @@ void eval(char *cmdline) {
   int bg;
   pid_t pid;
   struct job_t *job;
-  char **environ;
   strcpy(buf, cmdline);
   // parse command line for commands using parseline
   bg = parseline(cmdline, argv);
